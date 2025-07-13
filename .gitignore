@@ -25,3 +25,10 @@ build/
 # Environment files
 .env
 .env.local 
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+.auto.tfvars
