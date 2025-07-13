@@ -1,0 +1,2418 @@
+{
+  "datasets": [
+    {
+      "name": "64353b88",
+      "displayName": "job_logs",
+      "queryLines": [
+        "with\n",
+        "ranked_clusters as (\n",
+        "  select c.*, row_number() over (partition by c.cluster_id order by c.change_time desc) as rn\n",
+        "  from system.compute.clusters c\n",
+        "),\n",
+        "latest_clusters as (\n",
+        "  select *\n",
+        "  from ranked_clusters\n",
+        "  where rn = 1\n",
+        ")\n",
+        "SELECT\n",
+        "  l.*,\n",
+        "  c.create_time as cluster_create_time,\n",
+        "  c.tags as cluster_tags,\n",
+        "  c.workspace_id,\n",
+        "  c.owned_by,\n",
+        "  c.cluster_name,\n",
+        "  c.cluster_source,\n",
+        "  -- https://e2-demo-field-eng.cloud.databricks.com/jobs/65084945506620?o=1444828305810485\n",
+        "  -- CONCAT(wrk.workspace_url, 'jobs/', djrc.job_id) as job_id,\n",
+        "  djrc.job_id,\n",
+        "  j.name as job_name,\n",
+        "  -- https://e2-demo-field-eng.cloud.databricks.com/jobs/65084945506620/runs/104464058977680?o=1444828305810485\n",
+        "  djrc.job_run_id,\n",
+        "  -- https://e2-demo-field-eng.cloud.databricks.com/explore/data/volumes/watchtower/default/cluster_logs?o=1444828305810485&volumePath=%2FVolumes%2Fwatchtower%2Fdefault%2Fcluster_logs%2Fcluster-logs%2F0612-171922-fc7jka6x%2Fdriver%2F\n",
+        "  -- CONCAT(wrk.workspace_url, 'explore/data/volumes/', ) as log_url\n",
+        "  wrk.workspace_url\n",
+        "FROM watchtower.silver.logs l\n",
+        "LEFT JOIN watchtower.silver.job_run_compute djrc\n",
+        "  ON djrc.compute_id = l.cluster_id\n",
+        "LEFT JOIN latest_clusters c\n",
+        "  ON l.cluster_id = c.cluster_id\n",
+        "LEFT JOIN system.lakeflow.jobs j\n",
+        "  ON j.job_id = djrc.job_id AND djrc.compute_id = l.cluster_id\n",
+        "LEFT JOIN system.access.workspaces_latest wrk\n",
+        "  ON c.workspace_id = wrk.workspace_id\n",
+        "WHERE \n",
+        "    ((l.log_ts BETWEEN :dt_range.min AND :dt_range.max) OR (l.file_modification_time BETWEEN :dt_range.min AND :dt_range.max))\n",
+        "    AND djrc.job_run_id LIKE :job_run_id"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "dt_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-90d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "job_run_id",
+          "keyword": "job_run_id",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "%"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "columns": [
+        {
+          "displayName": "File Size (MB)",
+          "description": "Total logs file size in Megabytes",
+          "expression": "SUM(file_size) / 1024 / 1024"
+        },
+        {
+          "displayName": "File Size (GB)",
+          "description": "Total logs file size in Gigabytes",
+          "expression": "SUM(file_size) / 1024 / 1024 / 1024"
+        },
+        {
+          "displayName": "Error Count",
+          "description": "Number of ERROR level log messages",
+          "expression": "COUNT_IF(log_level = 'ERROR')"
+        }
+      ]
+    },
+    {
+      "name": "e209bc6c",
+      "displayName": "common_pattern_search",
+      "queryLines": [
+        "SELECT \n",
+        "  l.cluster_id,\n",
+        "  l.file_modification_time,\n",
+        "  l.log_source,\n",
+        "  l.log_msg,\n",
+        "  l.log_level,\n",
+        "  l.log_ts,\n",
+        "  c.create_time as cluster_create_time,\n",
+        "  c.tags as cluster_tags,\n",
+        "  c.workspace_id,\n",
+        "  c.owned_by,\n",
+        "  c.cluster_name,\n",
+        "  c.cluster_source,\n",
+        "  IFNULL(djrc.job_id, regexp_extract(c.cluster_name, r'^job-(\\d+)-run-.*$', 1)) as job_id,\n",
+        "  j.name as job_name,\n",
+        "  IFNULL(djrc.job_run_id, regexp_extract(c.cluster_name, r'^job-\\d+-run-(\\d+)-.*$', 1)) as job_run_id,\n",
+        "  l.file_size\n",
+        "FROM watchtower.silver.logs l\n",
+        "LEFT JOIN watchtower.silver.job_run_compute djrc\n",
+        "  ON djrc.compute_id = l.cluster_id\n",
+        "LEFT JOIN system.compute.clusters c\n",
+        "  ON l.cluster_id = c.cluster_id\n",
+        "LEFT JOIN system.lakeflow.jobs j\n",
+        "  ON j.job_id = djrc.job_id AND djrc.compute_id = l.cluster_id\n",
+        "WHERE \n",
+        "    ((l.log_ts BETWEEN :dt_range.min AND :dt_range.max) OR (l.file_modification_time BETWEEN :dt_range.min AND :dt_range.max))\n",
+        "    AND l.log_msg RLIKE :msg_filter\n",
+        "    AND (array_contains(:log_level_filter, l.log_level) OR array_contains(:log_level_filter, 'ALL'))\n",
+        "    AND l.log_source LIKE :log_source_filter\n",
+        ";"
+      ],
+      "parameters": [
+        {
+          "displayName": "log_source_filter",
+          "keyword": "log_source_filter",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "log4j"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "dt_range",
+          "keyword": "dt_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-60d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "msg_filter",
+          "keyword": "msg_filter",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "(OutOfMemory|Command exited with code 52|is bigger than spark.driver.maxResultSize)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "log_level_filter",
+          "keyword": "log_level_filter",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "WARN"
+                },
+                {
+                  "value": "ERROR"
+                },
+                {
+                  "value": "INFO"
+                },
+                {
+                  "value": "DEBUG"
+                },
+                {
+                  "value": "TRACE"
+                },
+                {
+                  "value": "ALL"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "columns": [
+        {
+          "displayName": "COUNT(*) / 3",
+          "description": "COUNT(*) / 3",
+          "expression": "COUNT(*) / 3"
+        }
+      ]
+    },
+    {
+      "name": "d2506cd6",
+      "displayName": "top_n_jobs_by_errors",
+      "queryLines": [
+        "WITH ranked_jobs_with_errors AS (\n",
+        "    SELECT \n",
+        "      djrc.job_id,\n",
+        "      COUNT_IF(l.log_level = 'ERROR') as errors\n",
+        "    FROM watchtower.silver.logs l\n",
+        "    LEFT JOIN watchtower.silver.job_run_compute djrc\n",
+        "        ON djrc.compute_id = l.cluster_id\n",
+        "    WHERE l.log_ts BETWEEN :dt_range.min AND :dt_range.max\n",
+        "    GROUP BY 1\n",
+        "    ORDER BY 2 DESC\n",
+        "    LIMIT :n\n",
+        ")\n",
+        "SELECT \n",
+        "  ranked.job_id, \n",
+        "  j.name as job_name,\n",
+        "  ranked.errors,\n",
+        "  j.workspace_id\n",
+        "FROM ranked_jobs_with_errors ranked\n",
+        "LEFT JOIN system.lakeflow.jobs j\n",
+        "  ON j.job_id = ranked.job_id\n",
+        ";"
+      ],
+      "parameters": [
+        {
+          "displayName": "dt_range",
+          "keyword": "dt_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-60d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "n",
+          "keyword": "n",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "50a8b1f4",
+      "displayName": "top_n_errors",
+      "queryLines": [
+        "SELECT \n",
+        "  l.log_msg,\n",
+        "  COUNT(*) as error_count\n",
+        "FROM watchtower.silver.logs l\n",
+        "WHERE l.log_level IN ('ERROR', 'FATAL', 'CRITICAL')\n",
+        "  AND l.log_ts BETWEEN :dt_range.min AND :dt_range.max\n",
+        "GROUP BY 1\n",
+        "ORDER BY 2 DESC\n",
+        "LIMIT :n"
+      ],
+      "parameters": [
+        {
+          "displayName": "dt_range",
+          "keyword": "dt_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-7d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "n",
+          "keyword": "n",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "b8aee69c",
+      "displayName": "Log Analysis",
+      "layout": [
+        {
+          "widget": {
+            "name": "c982d969",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_dt_range",
+                "query": {
+                  "datasetName": "64353b88",
+                  "parameters": [
+                    {
+                      "name": "dt_range",
+                      "keyword": "dt_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f04020578b16e8af4484de2b6fbec0_dt_range",
+                "query": {
+                  "datasetName": "d2506cd6",
+                  "parameters": [
+                    {
+                      "name": "dt_range",
+                      "keyword": "dt_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f0402172ae1658aa3d1ded3b6af7f8_dt_range",
+                "query": {
+                  "datasetName": "e209bc6c",
+                  "parameters": [
+                    {
+                      "name": "dt_range",
+                      "keyword": "dt_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "dt_range",
+                    "queryName": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_dt_range"
+                  },
+                  {
+                    "parameterName": "dt_range",
+                    "queryName": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f04020578b16e8af4484de2b6fbec0_dt_range"
+                  },
+                  {
+                    "parameterName": "dt_range",
+                    "queryName": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f0402172ae1658aa3d1ded3b6af7f8_dt_range"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "range": {
+                    "dataType": "DATETIME",
+                    "min": {
+                      "value": "now-7d/d"
+                    },
+                    "max": {
+                      "value": "now/d"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Date Range"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "5699bd3f",
+            "queries": [
+              {
+                "name": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_job_name",
+                "query": {
+                  "datasetName": "64353b88",
+                  "fields": [
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "job_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "job_name",
+                    "displayName": "job_name",
+                    "queryName": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_job_name"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Job Name"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "ea110d5d",
+            "queries": [
+              {
+                "name": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_log_source",
+                "query": {
+                  "datasetName": "64353b88",
+                  "fields": [
+                    {
+                      "name": "log_source",
+                      "expression": "`log_source`"
+                    },
+                    {
+                      "name": "log_source_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "log_source",
+                    "displayName": "log_source",
+                    "queryName": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_log_source"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Log Source"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "67e8a7d9",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "64353b88",
+                  "fields": [
+                    {
+                      "name": "log_ts",
+                      "expression": "`log_ts`"
+                    },
+                    {
+                      "name": "log_level",
+                      "expression": "`log_level`"
+                    },
+                    {
+                      "name": "log_msg",
+                      "expression": "`log_msg`"
+                    },
+                    {
+                      "name": "log_source",
+                      "expression": "`log_source`"
+                    },
+                    {
+                      "name": "cluster_source",
+                      "expression": "`cluster_source`"
+                    },
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "job_run_id",
+                      "expression": "`job_run_id`"
+                    },
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_url",
+                      "expression": "`workspace_url`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "log_ts",
+                    "dateTimeFormat": "YYYY-MM-DD HH:mm:ss.SSS",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Timestamp",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "log_ts"
+                  },
+                  {
+                    "fieldName": "log_level",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Level",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "cellFormat": {
+                      "default": {
+                        "foregroundColor": null
+                      },
+                      "rules": [
+                        {
+                          "if": {
+                            "column": "log_level",
+                            "fn": "=",
+                            "literal": "WARN"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 2
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "log_level",
+                            "fn": "=",
+                            "literal": "ERROR"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 4
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "log_level",
+                            "fn": "=",
+                            "literal": "INFO"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 1
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "log_level",
+                            "fn": "=",
+                            "literal": "DEBUG"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 5
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "log_level",
+                            "fn": "=",
+                            "literal": "CRITICAL"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 4
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "displayName": "log_level"
+                  },
+                  {
+                    "fieldName": "log_msg",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Message",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "cellFormat": {
+                      "default": {
+                        "foregroundColor": null
+                      },
+                      "rules": [
+                        {
+                          "if": {
+                            "column": "log_level",
+                            "fn": "=",
+                            "literal": "ERROR"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 4
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "log_level",
+                            "fn": "=",
+                            "literal": "WARN"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 2
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "log_level",
+                            "fn": "=",
+                            "literal": "CRITICAL"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 4
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "displayName": "log_msg"
+                  },
+                  {
+                    "fieldName": "log_source",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 6,
+                    "title": "Source",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "cellFormat": {
+                      "default": {
+                        "foregroundColor": null
+                      },
+                      "rules": [
+                        {
+                          "if": {
+                            "column": "log_source",
+                            "fn": "=",
+                            "literal": "stderr"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 6
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "log_source",
+                            "fn": "=",
+                            "literal": "log4j"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 3
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "log_source",
+                            "fn": "=",
+                            "literal": "stdout"
+                          },
+                          "value": {
+                            "foregroundColor": null
+                          }
+                        }
+                      ]
+                    },
+                    "displayName": "log_source"
+                  },
+                  {
+                    "fieldName": "cluster_source",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 9,
+                    "title": "Cluster Source",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "cluster_source"
+                  },
+                  {
+                    "fieldName": "job_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "https://{{workspace_url}}/jobs/{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "link",
+                    "visible": true,
+                    "order": 10,
+                    "title": "Job ID",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "job_id"
+                  },
+                  {
+                    "fieldName": "job_name",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "https://{{workspace_url}}/jobs/{{ job_id }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "link",
+                    "visible": true,
+                    "order": 11,
+                    "title": "Job Name",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "job_name"
+                  },
+                  {
+                    "fieldName": "job_run_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "https://{{workspace_url}}/jobs/{{ job_id }}/runs/{{ job_run_id }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "link",
+                    "visible": true,
+                    "order": 12,
+                    "title": "Job Run ID",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "job_run_id"
+                  },
+                  {
+                    "fieldName": "workspace_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "https://{{workspace_url}}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "link",
+                    "visible": true,
+                    "order": 13,
+                    "title": "Workspace",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "workspace_id"
+                  }
+                ]
+              },
+              "invisibleColumns": [
+                {
+                  "dateTimeFormat": "YYYY-MM-DD HH:mm:ss.SSS",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "file_modification_time",
+                  "type": "datetime",
+                  "displayAs": "datetime",
+                  "order": 3,
+                  "title": "file_modification_time",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "file_size",
+                  "type": "integer",
+                  "displayAs": "number",
+                  "order": 4,
+                  "title": "file_size",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "cluster_id",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 5,
+                  "title": "cluster_id",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "owned_by",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 7,
+                  "title": "owned_by",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "cluster_name",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 8,
+                  "title": "cluster_name",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "dateTimeFormat": "YYYY-MM-DD HH:mm:ss.SSS",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "cluster_create_time",
+                  "type": "datetime",
+                  "displayAs": "datetime",
+                  "order": 14,
+                  "title": "cluster_create_time",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "cluster_tags",
+                  "type": "complex",
+                  "displayAs": "json",
+                  "order": 15,
+                  "title": "cluster_tags",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "file_path",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 16,
+                  "title": "file_path",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "file_name",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 17,
+                  "title": "file_name",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "workspace_url",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 18,
+                  "title": "workspace_url",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                }
+              ],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": false,
+                "title": "Log Search"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "34fb67f5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "64353b88",
+                  "fields": [
+                    {
+                      "name": "measure(File Size (GB))",
+                      "expression": "MEASURE(`File Size (GB)`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(File Size (GB))",
+                  "displayName": "File Size (GB)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Filtered Logs (GB)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 1,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "7e41d649",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_job_run_id",
+                "query": {
+                  "datasetName": "64353b88",
+                  "parameters": [
+                    {
+                      "name": "job_run_id",
+                      "keyword": "job_run_id"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "job_run_id",
+                    "queryName": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_job_run_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Job Run ID"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "ca08e9b9",
+            "queries": [
+              {
+                "name": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_workspace_id",
+                "query": {
+                  "datasetName": "64353b88",
+                  "fields": [
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f04020578b16e8af4484de2b6fbec0_workspace_id",
+                "query": {
+                  "datasetName": "d2506cd6",
+                  "fields": [
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f0402172ae1658aa3d1ded3b6af7f8_workspace_id",
+                "query": {
+                  "datasetName": "e209bc6c",
+                  "fields": [
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "workspace_id",
+                    "displayName": "workspace_id",
+                    "queryName": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_workspace_id"
+                  },
+                  {
+                    "fieldName": "workspace_id",
+                    "displayName": "workspace_id",
+                    "queryName": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f04020578b16e8af4484de2b6fbec0_workspace_id"
+                  },
+                  {
+                    "fieldName": "workspace_id",
+                    "displayName": "workspace_id",
+                    "queryName": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f0402172ae1658aa3d1ded3b6af7f8_workspace_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Workspaces"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "5aef58ad",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "64353b88",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`log_level` IN ('ERROR')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)",
+                  "displayName": "Count of Records"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Errors Logged"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 1,
+            "width": 1,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "6e77d0d9",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d2506cd6",
+                  "fields": [
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "errors",
+                      "expression": "`errors`"
+                    },
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "job_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "https://{{workspace_url}}/jobs/{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "link",
+                    "visible": true,
+                    "order": 100000,
+                    "title": "Job ID",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "job_id"
+                  },
+                  {
+                    "fieldName": "job_name",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100001,
+                    "title": "Job Name",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "job_name"
+                  },
+                  {
+                    "fieldName": "errors",
+                    "numberFormat": "0",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100002,
+                    "title": "Errors",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "errors"
+                  },
+                  {
+                    "fieldName": "workspace_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100003,
+                    "title": "Workspace ID",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "workspace_id"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Top N Jobs with highest error count"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "5ab0b5d0",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Top N Analysis"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 5,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "c6c8b136",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "50a8b1f4",
+                  "fields": [
+                    {
+                      "name": "error_count",
+                      "expression": "`error_count`"
+                    },
+                    {
+                      "name": "log_msg",
+                      "expression": "`log_msg`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "error_count",
+                    "numberFormat": "0",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Occurrences",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "error_count"
+                  },
+                  {
+                    "fieldName": "log_msg",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Log Message",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "log_msg"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Top N Most Common Errors"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 15,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "8da8ddeb",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Detecting Common Issues"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "4f24b577",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e209bc6c",
+                  "fields": [
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "parameterValues": [
+                    {
+                      "keyword": "msg_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "(OutOfMemory|Command exited with code 52|is bigger than spark.driver.maxResultSize)"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "keyword": "log_level_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "ERROR"
+                            },
+                            {
+                              "value": "WARN"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "keyword": "log_source_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "log4j"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "job_id"
+                        ]
+                      },
+                      {}
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`job_id`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "job_id",
+                    "displayTotal": true,
+                    "displayName": "Job ID"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "count(*)",
+                      "cellType": "text",
+                      "displayName": "Occurrences"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "[Performance] OutOfMemory (OOM) Errors",
+                "description": "OOM errors indicate the JVM memory is exhausted. OOM errors come in a multiple forms, such as on-heap and off-heap. Excessively high amounts of garbage collection (GC) may be an indicator of heap memory issues.\n"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "b8f72767",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e209bc6c",
+                  "fields": [
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "parameterValues": [
+                    {
+                      "keyword": "msg_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "% spill%"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "keyword": "log_level_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "WARN"
+                            },
+                            {
+                              "value": "ERROR"
+                            },
+                            {
+                              "value": "INFO"
+                            },
+                            {
+                              "value": "FATAL"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "keyword": "log_source_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "%"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "job_id"
+                        ]
+                      },
+                      {}
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`job_id`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "job_id",
+                    "displayName": "job_id"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "count(*)",
+                      "cellType": "text",
+                      "displayName": "Count of Records"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "[Performance] Spill to Disk",
+                "description": "When data is too large to fit into memory, or wide transformations create too much Spark shuffle that cannot fit in memory, Spark will spill to disk. Using node types with fast SSDs such as `i3.xlarge`, `r7gd.2xlarge`, etc. may improve disk IO performance, but spilling to disk will still degrade performance."
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 26,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "355ab8cb",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e209bc6c",
+                  "fields": [
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "measure(COUNT(*) / 3)",
+                      "expression": "MEASURE(`COUNT(*) / 3`)"
+                    }
+                  ],
+                  "parameterValues": [
+                    {
+                      "keyword": "msg_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "^.-{3,}"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "keyword": "log_level_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "ALL"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "keyword": "log_source_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "stdout"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "job_id"
+                        ]
+                      },
+                      {}
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`job_id`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "job_id",
+                    "displayTotal": true,
+                    "displayName": "Job ID"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "measure(COUNT(*) / 3)",
+                      "cellType": "text",
+                      "format": {
+                        "type": "number-plain",
+                        "abbreviation": "none",
+                        "decimalPlaces": {
+                          "type": "exact",
+                          "places": 0
+                        },
+                        "hideGroupSeparator": true
+                      },
+                      "displayName": "Occurrences"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "[Privacy] df.show() Found in Logs",
+                "description": "Remove .show() statements to avoid leaking private or sensitive data in logs.\n"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 26,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "86016e43",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e209bc6c",
+                  "fields": [
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "parameterValues": [
+                    {
+                      "keyword": "msg_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "Lost executor"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "keyword": "log_level_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "ERROR"
+                            },
+                            {
+                              "value": "WARN"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "keyword": "log_source_filter",
+                      "selection": {
+                        "values": {
+                          "dataType": "STRING",
+                          "values": [
+                            {
+                              "value": "log4j"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "job_id"
+                        ]
+                      },
+                      {}
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`job_id`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "job_id",
+                    "displayTotal": true,
+                    "displayName": "Job ID"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "count(*)",
+                      "cellType": "text",
+                      "displayName": "Occurrences"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "[Performance] Lost Executors",
+                "description": "Executors may crash due to errors in distributed tasks, or from executor running out of memory, which will also be indicated on other panels in this dashboard.\n"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 21,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "53780152",
+            "queries": [
+              {
+                "name": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_log_level",
+                "query": {
+                  "datasetName": "64353b88",
+                  "fields": [
+                    {
+                      "name": "log_level",
+                      "expression": "`log_level`"
+                    },
+                    {
+                      "name": "log_level_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f0402172ae1658aa3d1ded3b6af7f8_log_level",
+                "query": {
+                  "datasetName": "e209bc6c",
+                  "fields": [
+                    {
+                      "name": "log_level",
+                      "expression": "`log_level`"
+                    },
+                    {
+                      "name": "log_level_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "log_level",
+                    "displayName": "log_level",
+                    "queryName": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f017021bb21b6caddb68b3d3ac5f55_log_level"
+                  },
+                  {
+                    "fieldName": "log_level",
+                    "displayName": "log_level",
+                    "queryName": "dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f0402172ae1658aa3d1ded3b6af7f8_log_level"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Log Level"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "e48ad8a3",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Log Search"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "d0e07a8a",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f04020578b16e8af4484de2b6fbec0_n",
+                "query": {
+                  "datasetName": "d2506cd6",
+                  "parameters": [
+                    {
+                      "name": "n",
+                      "keyword": "n"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f047ba1d271b14bcb52b87f0cac6dd_n",
+                "query": {
+                  "datasetName": "50a8b1f4",
+                  "parameters": [
+                    {
+                      "name": "n",
+                      "keyword": "n"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "n",
+                    "queryName": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f04020578b16e8af4484de2b6fbec0_n"
+                  },
+                  {
+                    "parameterName": "n",
+                    "queryName": "parameter_dashboards/01f0170208a4102683d2dd087d6711f5/datasets/01f047ba1d271b14bcb52b87f0cac6dd_n"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top N"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 14,
+            "width": 1,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    }
+  }
+}

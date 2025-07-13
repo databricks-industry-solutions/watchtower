@@ -1,0 +1,6 @@
+resources:
+  dashboards:
+    watchtower:
+      display_name: "Logs Dashboard (Watchtower)"
+      file_path: "../dashboards/watchtower.lvdash.json"
+      warehouse_id: "${var.warehouse_id}"

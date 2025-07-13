@@ -38,6 +38,15 @@ if ! command -v databricks &> /dev/null; then
     exit 1
 fi
 
+# Check if Terraform is installed
+if ! command -v terraform &> /dev/null; then
+    print_error "Terraform is not installed or not in PATH"
+    echo "Please install it with: brew install terraform"
+    exit 1
+fi
+
+print_success "Terraform found"
+
 # Show what will be destroyed
 print_status "Getting current deployment summary..."
 databricks bundle summary
@@ -63,6 +72,17 @@ else
     print_status "Cleanup cancelled"
     exit 0
 fi
+
+print_status "Getting Terraform resources..."
+cd terraform
+terraform destroy
+if [ $? -ne 0 ]; then
+    print_error "Terraform destroy failed"
+    exit 1
+fi
+
+cd ..
+print_success "Terraform resources destroyed"
 
 echo ""
 print_success "Cleanup completed! 🎉" 

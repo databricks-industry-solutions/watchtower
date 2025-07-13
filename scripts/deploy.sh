@@ -41,6 +41,15 @@ fi
 
 print_success "Databricks CLI found"
 
+# Check if Terraform is installed
+if ! command -v terraform &> /dev/null; then
+    print_error "Terraform is not installed or not in PATH"
+    echo "Please install it with: brew install terraform"
+    exit 1
+fi
+
+print_success "Terraform found"
+
 # Load environment variables from .env file if it exists
 if [ -f ".env" ]; then
     print_status "Loading environment variables from .env file..."
@@ -50,7 +59,20 @@ else
     print_status "No .env file found - using system environment variables"
 fi
 
-# Step 1: Validate the bundle
+# Step 1: Apply Terraform
+print_status "Applying Terraform..."
+cd terraform
+terraform init
+terraform apply 
+if [ $? -ne 0 ]; then
+    print_error "Terraform apply failed"
+    exit 1
+fi
+
+cd ..
+print_success "Terraform applied"
+
+# Step 2: Validate the bundle
 print_status "Validating bundle configuration..."
 if [ -z "$DATABRICKS_WAREHOUSE_ID" ]; then
     print_warning "DATABRICKS_WAREHOUSE_ID not set - dashboard deployment will be skipped"
@@ -71,7 +93,7 @@ else
     fi
 fi
 
-# Step 2: Deploy the bundle
+# Step 3: Deploy the bundle
 print_status "Deploying bundle to Databricks workspace..."
 if [ -n "$DATABRICKS_WAREHOUSE_ID" ]; then
     if databricks bundle deploy --var="warehouse_id=$DATABRICKS_WAREHOUSE_ID"; then
@@ -89,7 +111,7 @@ else
     fi
 fi
 
-# Step 3: Show deployment summary
+# Step 4: Show deployment summary
 print_status "Getting deployment summary..."
 if [ -n "$DATABRICKS_WAREHOUSE_ID" ]; then
     databricks bundle summary --var="warehouse_id=$DATABRICKS_WAREHOUSE_ID"
@@ -97,7 +119,7 @@ else
     databricks bundle summary
 fi
 
-# Step 4: Ask if user wants to run the demo job
+# Step 5: Ask if user wants to run the demo job
 echo ""
 read -p "Do you want to run the demo job now? (y/n): " -n 1 -r
 echo
@@ -120,27 +142,31 @@ else
     print_status "Skipping job execution"
 fi
 
+# Step 6: Ask if user wants to run the log ingestion pipeline
+echo ""
+read -p "Do you want to run the log ingestion pipeline now? (y/n): " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    print_status "Running log ingestion pipeline..."
+    if [ -n "$DATABRICKS_WAREHOUSE_ID" ]; then
+        if databricks bundle run watchtower_pipeline --var="warehouse_id=$DATABRICKS_WAREHOUSE_ID"; then
+            print_success "Log ingestion pipeline completed successfully!"
+        else
+            print_warning "Log ingestion pipeline failed - check the Databricks UI for details"
+        fi
+    else
+        if databricks bundle run watchtower_pipeline; then
+            print_success "Log ingestion pipeline completed successfully!"
+        else
+            print_warning "Log ingestion pipeline failed - check the Databricks UI for details"
+        fi
+    fi
+else
+    print_status "Skipping log ingestion pipeline"
+fi
+
 echo ""
 echo "=================================================="
 print_success "Deployment script completed!"
 echo ""
-echo "📋 What was deployed:"
-echo "   • Bundle: dbx-dabs-demo"
-echo "   • Location: /Workspace/Shared/dbx-dabs-demo/"
-echo "   • Job: Databricks Demo Deployment Example - Two Simple Notebooks"
-echo "   • Notebooks: notebook1.ipynb → notebook2.ipynb"
-echo "   • Dashboard: Demo Dashboard"
-echo "   • App: demo-app (Streamlit)"
-echo ""
-echo "🔗 Useful commands:"
-if [ -n "$DATABRICKS_WAREHOUSE_ID" ]; then
-    echo "   • View summary: databricks bundle summary --var=\"warehouse_id=\$DATABRICKS_WAREHOUSE_ID\""
-    echo "   • Run job: databricks bundle run demo_workflow --var=\"warehouse_id=\$DATABRICKS_WAREHOUSE_ID\""
-    echo "   • Destroy bundle: databricks bundle destroy --var=\"warehouse_id=\$DATABRICKS_WAREHOUSE_ID\""
-else
-    echo "   • View summary: databricks bundle summary"
-    echo "   • Run job: databricks bundle run demo_workflow"
-    echo "   • Destroy bundle: databricks bundle destroy"
-fi
-echo ""
-print_success "Happy coding! 🎉" 
+print_success "Happy logging! 🎉" 

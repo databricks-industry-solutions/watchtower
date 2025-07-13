@@ -1,0 +1,38 @@
+# An example ETL job for watchtower to ingest logs/metrics from for demonstration.
+resources:
+  jobs:
+    demo_workflow:
+      name: watchtower_demo_job
+
+      tasks:
+        - task_key: notebook_task
+          job_cluster_key: job_cluster
+          notebook_task:
+            notebook_path: ../notebooks/demo_etl.ipynb
+        
+        - task_key: refresh_watchtower
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.watchtower_pipeline.id}
+          depends_on:
+            - task_key: notebook_task
+          run_if: ALL_DONE
+
+      job_clusters:
+        - job_cluster_key: job_cluster
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: i3.xlarge
+            data_security_mode: SINGLE_USER
+            num_workers: 1
+            
+            # Configure your jobs to send logs to the watchtower volume
+            cluster_log_conf:
+              volumes:
+                destination: ${var.cluster_logs_volume}
+
+            # Logs from init scripts also generate logs into the watchtower volume.
+            # In this case, we're using the init script to configure log4j
+            # to get structured log formatting.
+            init_scripts:
+              - volumes:
+                  destination: ${var.init_script_path}

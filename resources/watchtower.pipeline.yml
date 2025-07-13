@@ -1,0 +1,16 @@
+# The main pipeline for watchtower
+resources:
+  pipelines:
+    watchtower_pipeline:
+      name: watchtower_pipeline
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      libraries:
+        - notebook:
+            path: ../notebooks/dlt_pipeline.ipynb
+      
+      serverless: true
+
+      configuration:
+        bundle.sourcePath: ${workspace.file_path}/src
+        raw_log_location: ${var.cluster_logs_volume}
