@@ -1,6 +1,14 @@
-# Databricks Asset Bundles (DABs) Demo Template
+# Watchtower - Databricks Logging Solution
 
-A clean, minimal template for migrating existing projects to Databricks Asset Bundles format.
+A solution accelerator to standardizing, centralizing, and ingesting Databricks cluster logs
+for enhanced log searching, troubleshooting, and optimization.
+
+The goal of this repo is to provide platform adminsitrators and data engineers a reference implementation
+for scalable log ingestion, as well as broader guidance for practioners to use logging in jobs.
+
+![Log Search dashboard](./images/01-dashboard-logsearch.png)
+
+![Top N analysis dashboard](./images/02-dashboard-top-n.png)
 
 ## Quick Start
 
@@ -46,44 +54,49 @@ To enable automatic testing on Pull Requests:
 
 ## What Gets Deployed
 
-- **Workflow**: `Databricks Demo Deployment Example - Two Simple Notebooks` 
-- **Notebooks**: `notebook1.ipynb` → `notebook2.ipynb` (sequential execution)
-- **Dashboard**: `Demo Dashboard` (deployed alongside notebooks)
-- **App**: `demo-app` (Simple Streamlit app)
-- **Location**: `/Workspace/Users/your-email@company.com/dbx-dabs-demo-dev/`
+- **Pipeline**: `Databricks log ingestion pipeline` 
+- **Workflow**: `watchtower_demo_job`
+- **Dashboard**: `Logs Dashboard` (deployed alongside pipeline)
+- **Location**: `/Workspace/Users/your-email@company.com/.bundle/watchtower/`
 
 ## Manual Commands (if you prefer)
 
 ```bash
+cd terraform && terraform init && terraform apply && cd .. # Deploy Catalog resources and init scripts
 databricks bundle validate    # Check configuration
 databricks bundle deploy      # Deploy to workspace
 databricks bundle run demo_workflow # Run the demo workflow
 databricks bundle summary     # See what's deployed
 databricks bundle destroy     # Remove everything
+cd terraform && terraform destroy && cd ..
 ```
 
 ## Customizing for Your Project
 
-1. Update `databricks.yml` with your job/notebook names
-2. Replace `notebooks/notebook1.ipynb` and `notebooks/notebook2.ipynb` with your notebooks
+1. Update `databricks.yml` or the `resources/*.yml` files with your job/pipeline settings
+2. Modify `notebooks/dlt_pipeline.ipynb` to customize the log ingestion pipeline
 3. Modify the workspace `host` and `root_path` as needed
+4. Modify `terraform/main.tf` as needed, or create a `terraform/.auto.tfvars` file to override Terraform variables.
 
 ## Project Structure
 
 ```
 ├── databricks.yml           # Main DABs configuration
 ├── notebooks/
-│   ├── notebook1.ipynb      # First notebook
-│   └── notebook2.ipynb      # Second notebook (runs after first)
+│   ├── dlt_pipeline.ipynb   # Main watchtower log ingestion pipeline
+│   └── demo_etl.ipynb       # Notebook for the demo job
 ├── dashboards/
-│   └── dashboard_example.lvdash.json  # Demo dashboard
-├── apps/
-│   └── demo_app/
-│       ├── app.py                     # Streamlit app
-│       └── app.yaml                   # App configuration
+│   └── watchtower.lvdash.json    # Main watchtower dashboard for log analysis
+├── resources/                    # DAB resources to deploy
+│   ├── watchtower.dashboard.yml  # Main watchtower dashboard for log analysis
+│   ├── watchtower.demo.job.yml   # Demo job using structured logging frameworks
+│   └── watchtower.pipeline.yml   # Main pipeline for ingesting logs
+├── terraform/
+│   └── init-scripts/
+│       └── configure_log4j.sh  # Modifies Spark driver log4j2.xml to use JSON format
 └── scripts/
-    ├── deploy.sh           # Automated deployment
-    └── cleanup.sh          # Automated cleanup
+    ├── deploy.sh           # Automated deployment wrapper
+    └── cleanup.sh          # Automated cleanup wrapper
 ```
 
 That's it! 🚀 
