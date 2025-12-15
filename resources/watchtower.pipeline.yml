@@ -6,11 +6,15 @@ resources:
       catalog: ${var.catalog}
       schema: ${var.schema}
       libraries:
-        - notebook:
-            path: ../notebooks/dlt_pipeline.ipynb
-      
+        - file:
+            path: ../src/watchtower/log_ingest_pipeline.py
+
       serverless: true
 
       configuration:
         bundle.sourcePath: ${workspace.file_path}/src
         raw_log_location: ${var.cluster_logs_volume}
+        watchtower.job_run_compute.lookback_interval: ${var.job_run_compute_lookback_interval}
+        watchtower.autoloader.cleanSource: ${var.raw_log_retention_action}
+        watchtower.autoloader.retentionDuration: ${var.raw_log_retention_duration}
+        watchtower.autoloader.moveDestination: ${var.raw_log_retention_move_destination}

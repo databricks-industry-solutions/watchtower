@@ -1,0 +1,7 @@
+# Bandit security linter configuration shared across all bundles
+exclude_dirs:
+  - .venv*
+  - tests
+  - build
+  - dist
+

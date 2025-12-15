@@ -1,0 +1,9 @@
+# Pylint configuration shared across all bundles
+[MAIN]
+ignore-paths = .*/?.venv.*/
+# Add bundle src directories to path so pylint can resolve imports (mirrors conftest.py behavior)
+init-hook='import sys; from pathlib import Path; [sys.path.insert(0, str(p)) for p in Path.cwd().glob("bundles/*/src")]'
+
+[MESSAGES CONTROL]
+disable = C0301,R0801
+

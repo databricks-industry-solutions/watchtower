@@ -1,0 +1,9 @@
+# SQLFluff configuration shared across all bundles
+# https://docs.sqlfluff.com/en/stable/configuration/setting_configuration.html
+[sqlfluff]
+dialect = databricks
+exclude_rules =
+
+[sqlfluff:core]
+exclude_paths = .venv*,build,dist,*.egg-info
+
