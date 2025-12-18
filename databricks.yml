@@ -1,5 +1,14 @@
+# This is a Databricks asset bundle definition for watchtower.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
 bundle:
-  name: watchtower
+  name: "watchtower"
+  uuid: ddbb0f17-f1bb-4f37-b808-6b1e51c8c83b
+
+artifacts:
+  default:
+    type: whl
+    build: hatch build --clean -t wheel
+    path: .
 
 include:
   - resources/*.yml
@@ -10,16 +19,92 @@ variables:
   schema:
     default: default
   cluster_logs_volume:
+    # Note: this volume should be deployed via the provided Terraform.
     default: /Volumes/watchtower/default/cluster_logs/cluster-logs
   init_script_path:
+    # Note: this init script should be deployed via the provided Terraform.
     default: /Volumes/watchtower/default/init_scripts/configure_log4j.sh
   # The "warehouse_id" variable is used to reference the warehouse used by the dashboard.
   warehouse_id:
     lookup:
       # Replace this with the name of your SQL warehouse.
-      warehouse: "Shared Serverless"
+      # This is a prerequisite not deployed via the provided Terraform or bundle.
+      warehouse: "Shared Unity Catalog Serverless"
+  job_run_compute_lookback_interval:
+    default: INTERVAL 7 DAYS
+  demo_node_type_id:
+    default: i3.xlarge
+    description: Node type for the demo job cluster (cloud-specific)
+  raw_log_retention_action:
+    default: DELETE
+    description: Action to take on raw log files after autoloader has ingested them (DELETE, MOVE, or OFF)
+  raw_log_retention_duration:
+    default: 30 days
+    description: How long to retain raw log files before cleanup
+  raw_log_retention_move_destination:
+    default: ""
+    description: Destination path when using MOVE action (leave empty for DELETE action)
 
 targets:
   dev:
-    default: true
+    # The default target uses 'mode: development' to create a development copy.
+    # - Deployed resources get prefixed with '[dev my_user_name]'
+    # - Any job schedules and triggers are paused by default.
+    # See also https://docs.databricks.com/dev-tools/bundles/deployment-modes.html.
     mode: development
+    default: true
+    workspace:
+      host: https://CHANGEME.cloud.databricks.com
+    variables:
+      catalog: watchtower
+      schema: default
+
+  staging:
+    presets:
+      name_prefix: '[test] '
+      pipelines_development: true
+      trigger_pause_status: PAUSED
+      jobs_max_concurrent_runs: 1
+      tags:
+        Environment: Test
+        DeployedBy: DAB
+        Bundle: watchtower
+    workspace:
+      host: https://CHANGEME.cloud.databricks.com
+      root_path: /Shared/.bundle/${bundle.name}/${bundle.target}
+    permissions:
+      - group_name: users
+        level: CAN_VIEW
+    variables:
+      catalog: watchtower_test
+      schema: integration
+      cluster_logs_volume: /Volumes/watchtower_test/integration/test_data/cluster-logs
+    resources:
+      pipelines:
+        watchtower_pipeline:
+          libraries:
+            - file:
+                path: src/watchtower/log_ingest_pipeline.py
+            # Inject the pipeline test expectations
+            - file:
+                path: tests/it_log_ingest.py
+      jobs:
+        integration_tests:
+            name: watchtower_integration_tests
+            tasks:
+              - task_key: 01_setup_test_data
+                notebook_task:
+                  notebook_path: tests/notebooks/setup_test_data.py
+                  base_parameters:
+                    source_test_dir: ${workspace.root_path}/files/tests/data/
+                    target_dir: /Volumes/watchtower_test/integration/test_data/
+                max_retries: 0
+
+              - task_key: 02_run_pipeline_with_tests
+                pipeline_task:
+                  pipeline_id: ${resources.pipelines.watchtower_pipeline.id}
+                  full_refresh: true
+                depends_on:
+                  - task_key: 01_setup_test_data
+                max_retries: 0
+

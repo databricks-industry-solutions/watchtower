@@ -1,0 +1,18 @@
+appcds_setup elapsed time: 0.000
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+ANTLR Tool version 4.8 used for code generation does not match the current runtime version 4.9.3
+ANTLR Tool version 4.8 used for code generation does not match the current runtime version 4.9.3
+ANTLR Tool version 4.8 used for code generation does not match the current runtime version 4.9.3
+ANTLR Tool version 4.8 used for code generation does not match the current runtime version 4.9.3
+chown: invalid group: ‘:spark-users’
+Sun Jul 13 21:05:09 2025 Connection to spark from PID  1076
+Sun Jul 13 21:05:09 2025 Initialized gateway on port 34675
+Sun Jul 13 21:05:10 2025 Connected to spark.
+{"timestamp": "2025-07-13T21:05:15", "level": "INFO", "message": "This is an info message", "logger": "__main__", "line": 3}
+{"timestamp": "2025-07-13T21:05:15", "level": "WARNING", "message": "This is a warning message", "logger": "__main__", "line": 4}
+{"timestamp": "2025-07-13T21:05:15", "level": "ERROR", "message": "This is an error message", "logger": "__main__", "line": 10}
+{"timestamp": "2025-07-13T21:05:25", "level": "INFO", "message": "user email: john.doe@example.com", "logger": "__main__", "line": 2}
+{"timestamp": "2025-07-13T21:05:25", "level": "INFO", "message": "phone: 5015551234", "logger": "__main__", "line": 3}
+{"timestamp": "2025-07-13T21:05:25", "level": "INFO", "message": "Notebook path: /Users/zach.king@databricks.com/.bundle/watchtower/dev/files/notebooks/demo_etl", "logger": "__main__", "line": 11}

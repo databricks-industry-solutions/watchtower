@@ -5,26 +5,26 @@ resources:
       name: watchtower_demo_job
 
       tasks:
-        - task_key: notebook_task
+        - task_key: demo_logger
           job_cluster_key: job_cluster
           notebook_task:
-            notebook_path: ../notebooks/demo_etl.ipynb
-        
+            notebook_path: ../tests/notebooks/demo_etl.py
+
         - task_key: refresh_watchtower
           pipeline_task:
             pipeline_id: ${resources.pipelines.watchtower_pipeline.id}
           depends_on:
-            - task_key: notebook_task
+            - task_key: demo_logger
           run_if: ALL_DONE
 
       job_clusters:
         - job_cluster_key: job_cluster
           new_cluster:
             spark_version: 15.4.x-scala2.12
-            node_type_id: i3.xlarge
+            node_type_id: ${var.demo_node_type_id}
             data_security_mode: SINGLE_USER
             num_workers: 1
-            
+
             # Configure your jobs to send logs to the watchtower volume
             cluster_log_conf:
               volumes:

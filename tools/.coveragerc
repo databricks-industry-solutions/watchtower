@@ -1,0 +1,13 @@
+# Coverage configuration shared across all bundles
+[run]
+source = .
+branch = true
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == '__main__':
+    if __name__ == "__main__"
+

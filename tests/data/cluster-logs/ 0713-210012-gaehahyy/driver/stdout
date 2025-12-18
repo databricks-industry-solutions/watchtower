@@ -1,0 +1,7 @@
+2025-07-13T21:04:32.986+0000: [GC (Allocation Failure) [PSYoungGen: 4959232K->323727K(5785600K)] 5034724K->399227K(19010560K), 0.2229678 secs] [Times: user=0.62 sys=0.14, real=0.23 secs]
+2025-07-13T21:04:33.876+0000: [GC (Metadata GC Threshold) [PSYoungGen: 1134985K->252900K(6178816K)] 1210485K->371213K(19403776K), 0.1974096 secs] [Times: user=0.52 sys=0.14, real=0.20 secs]
+2025-07-13T21:04:34.073+0000: [Full GC (Metadata GC Threshold) [PSYoungGen: 252900K->0K(6178816K)] [ParOldGen: 118313K->347089K(13224960K)] 371213K->347089K(19403776K), [Metaspace: 153400K->153396K(1196032K)], 0.7424716 secs] [Times: user=2.28 sys=0.21, real=0.74 secs]
+2025-07-13T21:04:48.635+0000: [GC (Allocation Failure) [PSYoungGen: 5925888K->84337K(6268928K)] 6272977K->431451K(19493888K), 0.0793179 secs] [Times: user=0.16 sys=0.05, real=0.08 secs]
+2025-07-13T21:04:59.213+0000: [GC (Metadata GC Threshold) [PSYoungGen: 2821290K->60053K(6304768K)] 3168404K->407174K(19529728K), 0.0743700 secs] [Times: user=0.09 sys=0.06, real=0.07 secs]
+2025-07-13T21:04:59.287+0000: [Full GC (Metadata GC Threshold) [PSYoungGen: 60053K->0K(6304768K)] [ParOldGen: 347121K->124335K(13224960K)] 407174K->124335K(19529728K), [Metaspace: 252974K->252965K(1290240K)], 0.3864230 secs] [Times: user=0.76 sys=0.01, real=0.39 secs]
+NOTE: When using the `ipython kernel` entry point, Ctrl-C will not work.
