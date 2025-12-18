@@ -1,0 +1,184 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch]
+installer = "uv"
+
+[project]
+name = "watchtower"
+version = "0.1.0"
+description = "A Databricks observability solution"
+readme = "README.md"
+dynamic = ["dependencies"]
+requires-python = ">=3.9,<3.13"
+license-files = ["LICENSE.md"]
+authors = [
+  { name = "Zach King", email = "zcking@pm.me" }
+]
+maintainers = [
+  { name = "Zach King", email = "zcking@pm.me" }
+]
+
+[project.optional-dependencies]
+tests = [
+  "pytest>=7.4.2",
+  "pytest-cov>=4.1.0",
+  # tomli provides TOML parsing for Python <3.11. Python 3.11+ has built-in tomllib.
+  # This conditional dependency ensures compatibility across Python 3.9-3.12.
+  "tomli;python_version<'3.11'",
+  "requests>=2.31.0",
+  "packaging>=23.2",
+  "pyyaml>=6.0",
+  "types-PyYAML",
+]
+dlt = [
+  "databricks-dlt>=0.3.0"
+]
+
+# Define base environment templates for each DBR version
+[tool.hatch.envs.dbr-base]
+type = "virtual"
+features = [
+  "tests",
+]
+
+[tool.hatch.envs.dbr-base.scripts]
+test = "pytest --rootdir=. -c tools/pytest.ini {args:.}"
+cov = "pytest --rootdir=. -c tools/pytest.ini --cov=. --cov-report=term --cov-report=xml --cov-report=html {args:tests}"
+
+[tool.hatch.envs.dbr14]
+template = "dbr-base"
+python = "3.10"
+path = ".venv-dbr14"
+features = [
+  "dlt",
+]
+dependencies = [
+    "pyspark==3.5.0",
+    "delta-spark==3.1.0"
+]
+
+[tool.hatch.envs.dbr15]
+template = "dbr-base"
+python = "3.11"
+path = ".venv-dbr15"
+features = [
+  "dlt",
+]
+dependencies = [
+    "pyspark==3.5.0",
+    "delta-spark==3.2.0"
+]
+
+# Golden tools environment (detached, for linting)
+[tool.hatch.envs.lint]
+detached = true
+python = "3.11"
+path = ".venv-lint"
+dependencies = [
+  "ruff~=0.14.5",
+  "mypy~=1.18.0",
+  "sqlfluff>=3.0.0",
+]
+
+[tool.hatch.envs.lint.scripts]
+check = [
+  "ruff check --config tools/ruff.toml .",
+  "mypy --config-file tools/mypy.ini .",
+  "sqlfluff lint --config tools/.sqlfluff .",
+]
+fix = [
+  "ruff check --config tools/ruff.toml --fix .",
+]
+format = ["ruff format --config tools/ruff.toml ."]
+
+# Static analysis environment
+[tool.hatch.envs.analyze]
+detached = true
+python = "3.11"
+path = ".venv-analyze"
+features = [
+  "dlt",
+]
+dependencies = [
+  "ruff~=0.14.5",                     # Python formatting and linting
+  "mypy~=1.18.0",                     # Type checking
+  "sqlfluff>=3.0.0",                  # SQL linting
+  "pylint>=3.0.2",                    # Code quality and some SOLID principles
+  "radon>=6.0.1",                     # Cyclomatic complexity
+  "pydocstyle>=6.3.0",                # Docstring style
+  "bandit>=1.7.5",                    # Security issues
+  "wemake-python-styleguide>=0.18.0", # Enforces best practices including SOLID
+  "requests>=2.31.0",
+  "toml",
+  "types-requests==2.32.4.20250913",
+  "types-toml==0.10.8.20240310",
+]
+
+[tool.hatch.envs.analyze.scripts]
+type = "mypy --config-file tools/mypy.ini --strict ."
+lint = "pylint --rcfile=tools/.pylintrc ."
+complexity = ["ruff check --config tools/ruff.toml --select F ."]
+security = "bandit -c tools/.bandit -r bundles"
+all = [
+  "mypy --config-file tools/mypy.ini --strict .",
+  "pylint --rcfile=tools/.pylintrc . tests",
+  "ruff check --config tools/ruff.toml --select F .",
+  "pydocstyle .",
+  "bandit -c tools/.bandit -r bundles",
+]
+
+
+
+[tool.hatch.envs.test]
+dependencies = [
+  "pytest>=7.4.2",
+  "pytest-cov>=4.1.0",
+  "toml",
+  "requests>=2.31.0",
+  "packaging>=23.2",
+  "pyyaml>=6.0",
+]
+matrix-name-format = "{variable}{value}"
+
+# Override dependencies based on Python version
+[tool.hatch.envs.test.overrides]
+matrix.dbr.dependencies = [
+  { value = "pyspark==3.5.0", if = ["14"] },
+  { value = "delta-spark==3.1.0", if = ["14"] },
+  { value = "pyspark==3.5.0", if = ["15"] },
+  { value = "delta-spark==3.2.0", if = ["15"] },
+]
+matrix.dbr.python = [
+  { value = "3.10", if = ["14"] },
+  { value = "3.11", if = ["15"] },
+]
+
+
+[[tool.hatch.envs.test.matrix]]
+dbr = ["14","15"]
+
+# Test environment
+[tool.hatch.envs.test.scripts]
+test = "pytest --rootdir=. -c tools/pytest.ini {args:.}"
+cov = "pytest --rootdir=. -c tools/pytest.ini --cov=. --cov-report=term --cov-report=xml tests"
+
+
+# Coverage environment
+[tool.hatch.envs.coverage]
+python = "3.11"
+path = ".venv-coverage"
+dependencies = ["coverage>=7.3.2"]
+
+[tool.hatch.envs.coverage.scripts]
+report = [
+  "coverage combine --rcfile=tools/.coveragerc",
+  "coverage report --rcfile=tools/.coveragerc --show-missing",
+  "coverage xml --rcfile=tools/.coveragerc",
+  "coverage html --rcfile=tools/.coveragerc",
+]
+
+# include the bundles/ directory in the wheel package
+[tool.hatch.build.targets.wheel]
+packages = ["bundles"]
